@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="es">
+<head><link rel="icon" type="image/png" href="assets/images/logo-santiset-round.png"><link rel="apple-touch-icon" href="assets/images/logo-santiset-round.png">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Analizar · SantiSet</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/analyze.css">
+</head>
+<body>
+  <main class="app analyze-app">
+    <header class="analyze-header">
+      <div class="analyze-brand" aria-label="SantiSet">
+        <img class="analyze-logo" src="assets/images/logo-santiset-round.png" alt="SantiSet"><small id="analyzeMatchName" class="analyze-match-name">Sin partido</small>
+      </div>
+      <div class="header-actions" aria-label="Acciones rápidas">
+        <button id="undo" class="mini-action" title="Deshacer último punto">Undo</button>
+        <button id="reset" class="mini-action danger" title="Resetear set">Reset</button>
+      </div>
+    </header>
+
+    <section id="score" class="score-row" aria-label="Marcador del set"></section>
+
+    <section class="chrono-row" aria-label="Cronómetro">
+      <button id="play" class="play-btn">▶</button>
+      <strong id="time" class="time-box">00:00</strong>
+      <button id="minus">-5s</button>
+      <button id="plus">+5s</button>
+    </section>
+
+    <div class="micro-title">Servicio y rally</div>
+    <section id="quick" class="quick-row"></section>
+
+    <div class="micro-title">Zona NF rival</div>
+    <section id="zones" class="zones-row"></section>
+
+    <div class="micro-title">Categoría golpe</div>
+    <section id="cats" class="cats-row"></section>
+
+    <section id="players" class="players-area"></section>
+
+    <section class="last-row" id="last">Sin eventos</section>
+
+    <section class="save-strip">
+      <span class="events-counter">Eventos: <b id="events">0</b></span>
+      <span id="saved-state" class="saved-state">Set local</span>
+    </section>
+
+    <dialog id="initialFlowDialog" class="sheet-dialog flow-dialog">
+      <form method="dialog" class="sheet-card flow-card">
+        <div class="sheet-head">
+          <strong>Empezar análisis</strong>
+        </div>
+        <p class="small">Selecciona un partido existente o crea uno nuevo antes de registrar puntos.</p>
+        <div class="flow-actions">
+          <button type="button" id="initialCreateMatch" class="primary">Crear nuevo partido</button>
+          <button type="button" id="initialOpenExisting" class="orange">Ir a otro partido</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="createMatchDialog" class="sheet-dialog">
+      <form id="createMatchForm" method="dialog" class="sheet-card">
+        <div class="sheet-head">
+          <strong>Nuevo partido</strong>
+          <button type="button" class="sheet-close" data-close="createMatchDialog">×</button>
+        </div>
+        <label>Nombre compañero
+          <input name="partner_name" class="field" autocomplete="off">
+        </label>
+        <label>Nombre pareja rival
+          <input name="rival_name" class="field" autocomplete="off" required>
+        </label>
+        <div class="form-grid">
+          <label>Tipo partido
+            <select name="match_type" class="field">
+              <option value="amistoso">Amistoso</option>
+              <option value="entrenamiento">Entrenamiento</option>
+              <option value="competicion">Competición</option>
+              <option value="torneo">Torneo</option>
+            </select>
+          </label>
+          <label>Tipo pista
+            <select name="court_type" class="field">
+              <option value="indoor">Indoor</option>
+              <option value="outdoor">Outdoor</option>
+              <option value="moqueta">Moqueta</option>
+              <option value="muro">Muro</option>
+              <option value="cristal">Cristal</option>
+            </select>
+          </label>
+        </div>
+        <label>Lugar
+          <input name="location" class="field" autocomplete="off">
+        </label>
+        <label>Fecha
+          <input name="date" type="datetime-local" class="field">
+        </label>
+        <label>Enlace YouTube
+          <input name="video_url" type="url" class="field" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+        </label>
+        <label>Notas
+          <textarea name="notes" class="field" rows="2"></textarea>
+        </label>
+        <button class="primary" value="default">Crear partido y empezar</button>
+      </form>
+    </dialog>
+
+    <dialog id="selectMatchDialog" class="sheet-dialog">
+      <form method="dialog" class="sheet-card">
+        <div class="sheet-head">
+          <strong>Elegir partido</strong>
+          <button type="button" class="sheet-close" data-close="selectMatchDialog">×</button>
+        </div>
+        <label>Partido
+          <select id="initialMatchPicker" class="field"></select>
+        </label>
+        <button type="button" id="initialLoadMatch" class="primary">Abrir partido</button>
+      </form>
+    </dialog>
+
+    <dialog id="setInfoDialog" class="sheet-dialog">
+      <form id="setInfoForm" method="dialog" class="sheet-card">
+        <div class="sheet-head">
+          <strong>Datos del set</strong>
+          <button type="button" class="sheet-close" data-close="setInfoDialog">×</button>
+        </div>
+
+        <label>Nombre compañero
+          <input name="partner_name" class="field" autocomplete="off">
+        </label>
+        <label>Nombre pareja rival
+          <input name="rival_name" class="field" autocomplete="off">
+        </label>
+        <div class="form-grid">
+          <label>Tipo partido
+            <select name="match_type" class="field">
+              <option value="amistoso">Amistoso</option>
+              <option value="entrenamiento">Entrenamiento</option>
+              <option value="competicion">Competición</option>
+              <option value="torneo">Torneo</option>
+            </select>
+          </label>
+          <label>Tipo pista
+            <select name="court_type" class="field">
+              <option value="indoor">Indoor</option>
+              <option value="outdoor">Outdoor</option>
+              <option value="moqueta">Moqueta</option>
+              <option value="muro">Muro</option>
+              <option value="cristal">Cristal</option>
+            </select>
+          </label>
+        </div>
+        <label>Lugar
+          <input name="location" class="field" autocomplete="off">
+        </label>
+        <label>Fecha
+          <input name="date" type="datetime-local" class="field">
+        </label>
+        <label>Notas
+          <textarea name="notes" class="field" rows="3"></textarea>
+        </label>
+        <button class="primary" value="default">Guardar datos</button>
+      </form>
+    </dialog>
+
+    <dialog id="saveDialog" class="sheet-dialog">
+      <form id="saveForm" method="dialog" class="sheet-card">
+        <div class="sheet-head">
+          <strong>Guardar set</strong>
+          <button type="button" class="sheet-close" data-close="saveDialog">×</button>
+        </div>
+        <label>Asignación
+          <select name="save_mode" id="saveMode" class="field">
+            <option value="current">Guardar en partido actual</option>
+            <option value="new">Crear nuevo partido</option>
+            <option value="existing">Asignar a partido existente</option>
+          </select>
+        </label>
+        <label id="existingMatchWrap" class="hidden">Partido existente
+          <select name="existing_match_id" id="existingMatch" class="field"></select>
+        </label>
+        <label>Nombre pareja rival
+          <input name="rival_name" class="field" autocomplete="off">
+        </label>
+        <label>Nombre compañero
+          <input name="partner_name" class="field" autocomplete="off">
+        </label>
+        <div class="form-grid">
+          <label>Tipo partido
+            <select name="match_type" class="field">
+              <option value="amistoso">Amistoso</option>
+              <option value="entrenamiento">Entrenamiento</option>
+              <option value="competicion">Competición</option>
+              <option value="torneo">Torneo</option>
+            </select>
+          </label>
+          <label>Tipo pista
+            <select name="court_type" class="field">
+              <option value="indoor">Indoor</option>
+              <option value="outdoor">Outdoor</option>
+              <option value="moqueta">Moqueta</option>
+              <option value="muro">Muro</option>
+              <option value="cristal">Cristal</option>
+            </select>
+          </label>
+        </div>
+        <label>Lugar
+          <input name="location" class="field" autocomplete="off">
+        </label>
+        <label>Fecha
+          <input name="date" type="datetime-local" class="field">
+        </label>
+        <label>Notas
+          <textarea name="notes" class="field" rows="2"></textarea>
+        </label>
+        <div class="sheet-actions"><button class="primary" value="default" data-action="save">Guardar set</button><button class="orange" value="default" data-action="new_set">Guardar y nuevo set</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="flowDialog" class="sheet-dialog">
+      <form method="dialog" class="sheet-card">
+        <div class="sheet-head">
+          <strong>Partido y set</strong>
+          <button type="button" class="sheet-close" data-close="flowDialog">×</button>
+        </div>
+        <label>Seleccionar partido
+          <select id="matchPicker" class="field"></select>
+        </label>
+        <div class="sheet-actions">
+          <button type="button" id="flowLoad" class="primary">Abrir partido</button>
+          <button type="button" id="flowCreate" class="orange">Crear partido</button>
+        </div>
+      </form>
+    </dialog>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+  <script type="module" src="js/analyze.js"></script>
+</body>
+</html>

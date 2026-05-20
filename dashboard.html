@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head><link rel="icon" type="image/png" href="assets/images/logo-santiset-round.png"><link rel="apple-touch-icon" href="assets/images/logo-santiset-round.png">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dashboard · SantiSet</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+  <main class="app dashboard-app">
+    <header class="top dashboard-top">
+      <div class="brand-logo-wrap"><img class="app-logo small" src="assets/images/logo-santiset-round.png" alt="SantiSet"><div class="brand-logo-stack"><div class="brand" id="title">Dashboard</div><div class="subtitle" id="meta">Análisis del partido</div></div></div>
+      <div class="avatar">📊</div>
+    </header>
+
+    <section class="dashboard-filters card">
+      <select class="field" id="matchSelect" aria-label="Seleccionar otro partido"></select>
+      <select class="field" id="setSelect" aria-label="Seleccionar set"></select>
+      <div class="segmented" role="tablist" aria-label="Vista dashboard">
+        <button class="seg active" data-view="GENERAL" type="button">Generales</button>
+        <button class="seg" data-view="J1" type="button">Revés</button>
+        <button class="seg" data-view="J2" type="button">Derecha</button>
+      </div>
+    </section>
+
+    <section id="setScore" class="set-scoreline"></section>
+
+    <section id="kpis" class="kpi-grid"></section>
+
+    <section class="dash-section">
+      <h3>Puntos ganados</h3>
+      <div class="analysis-grid">
+        <article class="card stat-card">
+          <h4>Errores no forzados del rival</h4>
+          <div id="wonRivalErrors" class="metric-list"></div>
+        </article>
+        <article class="card stat-card">
+          <h4>Errores forzados / golpes ganadores</h4>
+          <div id="wonWinners" class="metric-list"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="dash-section">
+      <h3>Puntos perdidos</h3>
+      <div class="analysis-grid">
+        <article class="card stat-card">
+          <h4>Errores no forzados propios</h4>
+          <div id="lostOwnErrors" class="metric-list"></div>
+        </article>
+        <article class="card stat-card">
+          <h4>Error forzado / golpe ganador rival</h4>
+          <div id="lostForced" class="metric-list"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="dash-section">
+      <h3>Golpes más destacados</h3>
+      <div class="analysis-grid">
+        <article class="card stat-card">
+          <h4>Ganados · Fondo</h4>
+          <div id="topWonBack" class="ranking-list"></div>
+        </article>
+        <article class="card stat-card">
+          <h4>Ganados · Red</h4>
+          <div id="topWonNet" class="ranking-list"></div>
+        </article>
+        <article class="card stat-card">
+          <h4>Perdidos · Fondo</h4>
+          <div id="topLostBack" class="ranking-list"></div>
+        </article>
+        <article class="card stat-card">
+          <h4>Perdidos · Red</h4>
+          <div id="topLostNet" class="ranking-list"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="dash-section">
+      <h3>Estadísticas servicio</h3>
+      <div id="serveStats" class="serve-grid"></div>
+    </section>
+
+    <section class="dash-section">
+      <h3>Estadísticas resto</h3>
+      <div id="returnStats" class="serve-grid"></div>
+    </section>
+  </main>
+  <script type="module" src="js/dashboard.js"></script>
+</body>
+</html>
