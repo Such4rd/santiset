@@ -3,3 +3,15 @@
 .set-history{grid-column:1/-1;display:flex;gap:4px;flex-wrap:wrap;margin-bottom:2px}.set-chip{border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:10px;font-weight:950;background:#fff}.set-chip.won{color:#0f5c2c;background:#effff3;border-color:#74bf88}.set-chip.lost{color:#a9271c;background:#fff1ef;border-color:#df7b72}.set-chip.live{color:#755019;background:#fff8df;border-color:#e9c768}.set-chip.current{box-shadow:0 0 0 2px rgba(22,74,43,.12)}.tiebreak-badge,.set-finished{grid-column:1/-1;font-size:10px;font-weight:950;border-radius:8px;padding:4px 6px;text-align:center}.tiebreak-badge{color:#244f86;background:#eef6ff;border:1px solid #bad7fb}.set-finished.won{color:#0f5c2c;background:#effff3;border:1px solid #74bf88}.set-finished.lost{color:#a9271c;background:#fff1ef;border:1px solid #df7b72}.score-table.finished{border-width:2px}.sheet-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.sheet-actions button{min-height:42px}
 
 .analyze-brand{flex-direction:row!important}.analyze-match-name{font-size:10px;color:#6b766f;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1}
+
+/* Botón contextual 2ª Falta / Resto en zonas */
+.zone-extra {
+  background: linear-gradient(135deg, #fff3d9, #ffe8b0);
+  border-color: #e8c06a;
+  color: #7a4e00;
+  font-weight: 900;
+}
+.zone-extra:active {
+  transform: scale(.95);
+  background: linear-gradient(135deg, #ffe8b0, #ffd880);
+}
