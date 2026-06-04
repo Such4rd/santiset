@@ -2,7 +2,7 @@ export const STORAGE_KEY = 'santiset.v1';
 export const CATEGORIES = {
   SAQUE: ['saque t','saque cristal','resto'],
   DERECHA: ['cruzada','paralela','centro','globo sin cristal'],
-  REVES: ['alta paralela','alta cruzada','baja paralela','baja cruzada'],
+  REVES: ['cruzada','paralela','centro','globo sin cristal'],
   VOLEA_DERECHA: ['alta paralela','alta cruzada','baja paralela','baja cruzada'],
   VOLEA_REVES: ['alta paralela','alta cruzada','baja paralela','baja cruzada'],
   ESP_FONDO: ['bajada derecha','bajada reves','chiquita cruzada','chiquita paralela','contrarremate','globo con cristal'],
