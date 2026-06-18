@@ -266,14 +266,30 @@ function normalizeCategory(value=''){
   return map[k] || String(value||'').trim().replace(/\s+/g,'_').toUpperCase();
 }
 function normalizeOutcome(value='', result=''){
-  const k=cleanKey(value);
-  if(['WINNER_OR_FORCED','WINNER','FORCED_ERROR','FORZADO WINNER','ERROR FORZADO WINNER','G W F','G WF','G W','G F'].includes(k)) return 'WINNER_OR_FORCED';
-  if(['RIVAL_UNFORCED_ERROR','ERROR NO FORZADO RIVAL','ENF RIVAL','G NF RIVAL'].includes(k)) return 'RIVAL_UNFORCED_ERROR';
-  if(['OWN_UNFORCED_ERROR','ERROR NO FORZADO PROPIO','ENF PROPIO','P NF'].includes(k)) return 'OWN_UNFORCED_ERROR';
-  if(['RIVAL_WINNER_OR_OWN_FORCED','WINNER RIVAL','FORZADO PROPIO','P W F','P WF','P W'].includes(k)) return 'RIVAL_WINNER_OR_OWN_FORCED';
+  const raw = String(value || '').trim();
+
+  // Formato canónico para claves técnicas del propio CSV:
+  // RIVAL_UNFORCED_ERROR, RIVAL-WINNER-OR-OWN-FORCED, etc.
+  // Antes cleanKey() cambiaba los guiones bajos por espacios y estas claves no coincidían.
+  const canonical = raw
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.\s-]+/g, '_')
+    .replace(/_+/g, '_');
+
+  // Formato legible para alias escritos a mano: "ENF rival", "P WF", etc.
+  const k = cleanKey(raw);
+
+  if(['WINNER_OR_FORCED','WINNER','FORCED_ERROR'].includes(canonical) || ['WINNER','FORCED ERROR','FORZADO WINNER','ERROR FORZADO WINNER','G W F','G WF','G W','G F'].includes(k)) return 'WINNER_OR_FORCED';
+  if(['RIVAL_UNFORCED_ERROR'].includes(canonical) || ['RIVAL UNFORCED ERROR','ERROR NO FORZADO RIVAL','ENF RIVAL','G NF RIVAL'].includes(k)) return 'RIVAL_UNFORCED_ERROR';
+  if(['OWN_UNFORCED_ERROR'].includes(canonical) || ['OWN UNFORCED ERROR','ERROR NO FORZADO PROPIO','ENF PROPIO','P NF'].includes(k)) return 'OWN_UNFORCED_ERROR';
+  if(['RIVAL_WINNER_OR_OWN_FORCED'].includes(canonical) || ['RIVAL WINNER OR OWN FORCED','WINNER RIVAL','FORZADO PROPIO','P W F','P WF','P W'].includes(k)) return 'RIVAL_WINNER_OR_OWN_FORCED';
+
+  // Fallback solo para CSV antiguos sin outcome/cause_key fiable.
   if(result==='WON') return 'WINNER_OR_FORCED';
   if(result==='LOST') return 'OWN_UNFORCED_ERROR';
-  return k || '';
+  return canonical || k || '';
 }
 function normalizeStroke(value=''){
   return String(value||'').trim().toLowerCase().normalize('NFC');

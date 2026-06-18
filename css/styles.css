@@ -84,3 +84,65 @@
 .event-score-line{display:flex;gap:12px;margin:4px 0 2px}
 .score-after{font-size:11px;color:var(--muted);background:#f2ece0;border:1px solid var(--line);border-radius:8px;padding:2px 7px}
 .score-after b{color:var(--text)}
+
+/* v15 resumen en tarjeta de partido */
+.match-summary{
+  margin-top:12px;
+  padding:12px 14px;
+  background:#faf7f0;
+  border:1px solid var(--line);
+  border-radius:16px;
+}
+.match-summary__title{
+  font-size:13px;
+  font-weight:800;
+  color:var(--text);
+  margin-bottom:9px;
+}
+.match-summary__grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.summary-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  min-height:38px;
+  padding:8px 10px;
+  background:#fffdf9;
+  border:1px solid var(--line);
+  border-radius:12px;
+}
+.summary-item__label{
+  font-size:12px;
+  color:var(--muted);
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.summary-item__value{
+  font-size:14px;
+  color:var(--text);
+  font-weight:900;
+  white-space:nowrap;
+}
+.summary-item.bp-favor{
+  background:#f2fbf4;
+  border-color:#cde8d3;
+}
+.summary-item.bp-contra{
+  background:#fff5f1;
+  border-color:#efd3c8;
+}
+.summary-item.highlighted{
+  grid-column:1 / -1;
+  background:#fff8df;
+  border-color:#ead9a8;
+}
+@media(max-width:520px){
+  .match-summary__grid{grid-template-columns:1fr}
+  .summary-item.highlighted{grid-column:auto}
+}

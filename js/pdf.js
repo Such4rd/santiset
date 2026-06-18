@@ -1,29 +1,396 @@
-import {general, service, byPlayer, topStrokes} from './analytics.js';
+import {general, service} from './analytics.js';
 import {loadDB, matchSets} from './storage.js';
+import {OUTCOMES, CATEGORY_LABELS} from './constants.js';
+
+const CAT_ORDER = ['SAQUE','DERECHA','REVES','VOLEA_DERECHA','VOLEA_REVES','ESP_FONDO','ESP_RED'];
+const CAT_SHORT = {SAQUE:'Saque',DERECHA:'Derecha',REVES:'Revés',VOLEA_DERECHA:'V. derecha',VOLEA_REVES:'V. revés',ESP_FONDO:'Esp. fondo',ESP_RED:'Esp. red'};
+const BACK_CATS = ['DERECHA','REVES','ESP_FONDO'];
+const NET_CATS = ['VOLEA_DERECHA','VOLEA_REVES','ESP_RED'];
+const GREEN = [31,77,61];
+const GREEN_2 = [47,105,83];
+const BLUE = [40,92,150];
+const ORANGE = [210,95,28];
+const RED = [168,54,45];
+const PURPLE = [103,75,160];
+const TEAL = [31,118,128];
+const GOLD = [177,115,32];
+const INDIGO = [75,85,150];
+const LINE = [219,207,191];
+const LIGHT = [250,247,240];
+const WHITE = [255,255,255];
+
 function setPoints(db,setId){ return db.points.filter(p=>p.set_id===setId); }
-function playerRows(points, match){ const j1=byPlayer(points,'J1'), j2=byPlayer(points,'J2'); return [[match?.player_j1_name||'Revés/J1',j1.won_by_player,j1.lost_by_player,j1.own_unforced_errors,j1.winner_or_forced,j1.rival_winner_or_own_forced,j1.balance],[match?.player_j2_name||'Derecha/J2',j2.won_by_player,j2.lost_by_player,j2.own_unforced_errors,j2.winner_or_forced,j2.rival_winner_or_own_forced,j2.balance]]; }
-function serviceRows(points){ const s=service(points); return [['1º saque',s.first_serve_points,s.first_serve_won,s.first_serve_points-s.first_serve_won,`${s.first_serve_win_pct}%`],['2º saque',s.second_serve_points,s.second_serve_won,s.second_serve_points-s.second_serve_won,`${s.second_serve_win_pct}%`],['Resto vs 1º',points.filter(p=>['R1','R2'].includes(p.server)&&p.serve_number==='1º').length,points.filter(p=>['R1','R2'].includes(p.server)&&p.serve_number==='1º'&&p.point_result==='WON').length,points.filter(p=>['R1','R2'].includes(p.server)&&p.serve_number==='1º'&&p.point_result==='LOST').length,`${s.return_vs_first_serve_won_pct}%`],['Resto vs 2º',points.filter(p=>['R1','R2'].includes(p.server)&&p.serve_number==='2º').length,points.filter(p=>['R1','R2'].includes(p.server)&&p.serve_number==='2º'&&p.point_result==='WON').length,points.filter(p=>['R1','R2'].includes(p.server)&&p.serve_number==='2º'&&p.point_result==='LOST').length,`${s.return_vs_second_serve_won_pct}%`]]; }
-function donutDataUrl(parts){
-  const c=document.createElement('canvas'); c.width=240; c.height=240; const ctx=c.getContext('2d'); const cx=120, cy=120, r=88; let start=-Math.PI/2; const total=parts.reduce((a,p)=>a+p.value,0)||1;
-  ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,240,240);
-  for(const p of parts){ const angle=(p.value/total)*Math.PI*2; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,r,start,start+angle); ctx.closePath(); ctx.fillStyle=p.color; ctx.fill(); start+=angle; }
-  ctx.beginPath(); ctx.arc(cx,cy,48,0,Math.PI*2); ctx.fillStyle='#ffffff'; ctx.fill();
-  ctx.fillStyle='#203d32'; ctx.font='bold 28px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(`${Math.round((parts[0]?.value||0)/total*100)}%`,cx,cy);
-  return c.toDataURL('image/png');
+function labelCat(cat){ return CAT_SHORT[cat] || CATEGORY_LABELS[cat] || cat || 'Sin dato'; }
+function count(points,predicate){ return points.filter(predicate).length; }
+function pct(a,b){ return b ? Math.round(a/b*100) : 0; }
+function isOurServer(server){ return ['J1','J2'].includes(server); }
+function isRivalServer(server){ return ['R1','R2'].includes(server); }
+function isTruthy(value){ return value === true || value === 1 || String(value).toLowerCase() === 'true'; }
+function safeText(value, fallback='-'){ return String(value ?? '').trim() || fallback; }
+function scoreText(set){
+  if(!set) return '-';
+  const a = Number(set.our_games ?? 0);
+  const b = Number(set.rival_games ?? 0);
+  return `${a}-${b}`;
 }
-function addDonuts(doc, x, y, charts){
-  charts.forEach((ch,i)=>{ const dx=x+i*170; doc.addImage(donutDataUrl(ch.parts),'PNG',dx,y,88,88); doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text(ch.label,dx+44,y+105,{align:'center'}); doc.setFont('helvetica','normal'); doc.text(ch.sub,dx+44,y+119,{align:'center'}); });
+function resultLine(sets){ return sets.length ? sets.map(scoreText).join(' / ') : '-'; }
+function setTitle(set, idx){ return `Set ${set?.set_number || idx + 1}`; }
+
+function gamePointFor(attackerPoint, defenderPoint, mode='ADVANTAGE'){
+  const a = String(attackerPoint ?? '0');
+  const d = String(defenderPoint ?? '0');
+  if(mode === 'GOLDEN_POINT' && a === '40' && d === '40') return true;
+  if(a === 'AD') return true;
+  return a === '40' && ['0','15','30'].includes(d);
 }
-function kpiCards(doc, y, rows){
-  rows.forEach((r,i)=>{ const x=40+i*126; doc.setFillColor(247,243,235); doc.roundedRect(x,y,112,52,10,10,'F'); doc.setFontSize(8); doc.setTextColor(90,98,92); doc.text(r[0],x+10,y+18); doc.setFont('helvetica','bold'); doc.setFontSize(17); doc.setTextColor(32,61,50); doc.text(String(r[1]),x+10,y+40); doc.setFont('helvetica','normal'); }); doc.setTextColor(0,0,0);
+function summaryForPoints(points){
+  const ordered = [...points].sort((a,b) =>
+    Number(a.point_id || 0) - Number(b.point_id || 0) ||
+    String(a.timestamp || '').localeCompare(String(b.timestamp || ''))
+  );
+  const g = general(ordered);
+  let bpForTotal = 0, bpForWon = 0;
+  let bpAgainstTotal = 0, bpAgainstWon = 0;
+  let before = {ourGames:0, rivalGames:0, ourPoint:'0', rivalPoint:'0', inTiebreak:false};
+
+  ordered.forEach(p => {
+    const mode = p.deuce_mode || 'ADVANTAGE';
+    if(!before.inTiebreak && isRivalServer(p.server) && gamePointFor(before.ourPoint, before.rivalPoint, mode)){
+      bpForTotal++;
+      if(Number(p.our_games_after || 0) > before.ourGames) bpForWon++;
+    }
+    if(!before.inTiebreak && isOurServer(p.server) && gamePointFor(before.rivalPoint, before.ourPoint, mode)){
+      bpAgainstTotal++;
+      if(Number(p.rival_games_after || 0) > before.rivalGames) bpAgainstWon++;
+    }
+    before = {
+      ourGames:Number(p.our_games_after || 0),
+      rivalGames:Number(p.rival_games_after || 0),
+      ourPoint:String(p.our_points_after ?? '0'),
+      rivalPoint:String(p.rival_points_after ?? '0'),
+      inTiebreak:isTruthy(p.in_tiebreak_after)
+    };
+  });
+
+  return {
+    pointsPlayed:g.total_points,
+    pointsWon:g.won_points,
+    breakFor:`${bpForWon}/${bpForTotal}`,
+    breakAgainst:`${bpAgainstWon}/${bpAgainstTotal}`,
+    winners:g.winner_or_forced,
+    unforced:g.own_unforced_errors
+  };
 }
+function summaryColumns(db, sets, matchId){
+  const cols = sets.map(s => ({label:setTitle(s,0), points:setPoints(db,s.id)}));
+  cols.push({label:'Partido total', points:db.points.filter(p=>p.match_id===matchId)});
+  return cols.map(c => ({...c, summary:summaryForPoints(c.points)}));
+}
+
+function wonRivalErrorRows(points){
+  return [
+    ['Pareja en red', count(points, p => p.outcome === OUTCOMES.RIVAL_UNFORCED_ERROR && p.court_zone === 'RED')],
+    ['Pareja en medio', count(points, p => p.outcome === OUTCOMES.RIVAL_UNFORCED_ERROR && p.court_zone === 'MEDIO')],
+    ['Pareja en fondo', count(points, p => p.outcome === OUTCOMES.RIVAL_UNFORCED_ERROR && p.court_zone === 'FONDO')],
+    ['Doble falta', count(points, p => p.outcome === OUTCOMES.RIVAL_UNFORCED_ERROR && p.stroke_type === 'doble_falta')],
+    ['Resto', count(points, p => p.outcome === OUTCOMES.RIVAL_UNFORCED_ERROR && p.stroke_type === 'resto_fallado')]
+  ];
+}
+function categoryRows(points, outcome){
+  return CAT_ORDER.map(cat => [labelCat(cat), count(points, p => p.outcome === outcome && p.stroke_category === cat)]);
+}
+function rowsForDefinition(points, kind){
+  if(kind === 'RIVAL_ERRORS') return wonRivalErrorRows(points);
+  if(kind === 'WINNERS') return categoryRows(points, OUTCOMES.WINNER_OR_FORCED);
+  if(kind === 'OWN_ERRORS') return categoryRows(points, OUTCOMES.OWN_UNFORCED_ERROR);
+  if(kind === 'RIVAL_WINNERS') return categoryRows(points, OUTCOMES.RIVAL_WINNER_OR_OWN_FORCED);
+  return [];
+}
+function tableRowsBySet(columns, kind, maxRows=7){
+  const totalPoints = columns.at(-1)?.points || [];
+  const labels = rowsForDefinition(totalPoints, kind).map(r => r[0]);
+  const rows = labels.map(label => {
+    const values = columns.map(c => (rowsForDefinition(c.points, kind).find(r => r[0] === label)?.[1]) || 0);
+    return [label, ...values];
+  }).sort((a,b) => Number(b.at(-1) || 0) - Number(a.at(-1) || 0));
+  return rows.filter(r => r.slice(1).some(v => Number(v) > 0)).slice(0,maxRows);
+}
+function playerCompareRows(points, outcome, maxRows=7){
+  const rows = categoryRows(points, outcome).map(([label,total]) => [
+    label,
+    count(points, p => p.outcome === outcome && labelCat(p.stroke_category) === label && p.player_id === 'J1'),
+    count(points, p => p.outcome === outcome && labelCat(p.stroke_category) === label && p.player_id === 'J2'),
+    total
+  ]).sort((a,b) => Number(b[3] || 0) - Number(a[3] || 0));
+  return rows.filter(r => r[3] > 0).slice(0,maxRows);
+}
+
+function strokeLabel(p){
+  const cat = labelCat(p.stroke_category);
+  const type = safeText(p.stroke_type, 'Sin golpe');
+  return `${cat} · ${type}`;
+}
+function filterCourt(points, courtGroup){
+  if(courtGroup === 'BACK') return points.filter(p => BACK_CATS.includes(p.stroke_category));
+  if(courtGroup === 'NET') return points.filter(p => NET_CATS.includes(p.stroke_category));
+  return points;
+}
+function highlightedGeneralRows(columns, outcomes, courtGroup, maxRows=8){
+  const allowed = Array.isArray(outcomes) ? outcomes : [outcomes];
+  const totalPoints = filterCourt(columns.at(-1)?.points || [], courtGroup)
+    .filter(p => allowed.includes(p.outcome) && p.stroke_category && p.stroke_type);
+
+  const totals = new Map();
+  totalPoints.forEach(p => {
+    const key = strokeLabel(p);
+    totals.set(key, (totals.get(key) || 0) + 1);
+  });
+
+  const labels = [...totals.entries()]
+    .filter(([,total]) => total > 1)
+    .sort((a,b) => b[1] - a[1])
+    .map(([label]) => label);
+
+  const rows = labels.map(label => {
+    const values = columns.map(c => {
+      const pts = filterCourt(c.points || [], courtGroup);
+      return count(pts, p => allowed.includes(p.outcome) && p.stroke_category && p.stroke_type && strokeLabel(p) === label);
+    });
+    return [label, ...values];
+  });
+
+  return rows
+    .filter(r => Number(r.at(-1) || 0) > 1)
+    .slice(0,maxRows);
+}
+function highlightedPlayerRows(sets, allPoints, outcomes, courtGroup){
+  // Golpes destacados del PDF: NO usa la estrellita/highlight.
+  // Agrupa todos los golpes registrados con total > 0 y los ordena por total descendente.
+  const allowed = Array.isArray(outcomes) ? outcomes : [outcomes];
+  const base = filterCourt(allPoints || [], courtGroup)
+    .filter(p => allowed.includes(p.outcome) && p.stroke_category && p.stroke_type && ['J1','J2'].includes(p.player_id));
+
+  const totals = new Map();
+  base.forEach(p => {
+    const key = strokeLabel(p);
+    if(!totals.has(key)) totals.set(key, {total:0, j1:0, j2:0});
+    const item = totals.get(key);
+    item.total++;
+    if(p.player_id === 'J1') item.j1++;
+    if(p.player_id === 'J2') item.j2++;
+  });
+
+  const labels = [...totals.entries()]
+    .filter(([,t]) => (t.j1 + t.j2) > 0)
+    .sort((a,b) => b[1].total - a[1].total || a[0].localeCompare(b[0]))
+    .map(([label]) => label);
+
+  return labels.map(label => {
+    const values = [];
+    let totalJ1 = 0;
+    let totalJ2 = 0;
+
+    sets.forEach(set => {
+      const setPts = base.filter(p => p.set_id === set.id && strokeLabel(p) === label);
+      const j1 = count(setPts, p => p.player_id === 'J1');
+      const j2 = count(setPts, p => p.player_id === 'J2');
+      values.push(j1, j2);
+      totalJ1 += j1;
+      totalJ2 += j2;
+    });
+
+    return [label, ...values, totalJ1, totalJ2];
+  });
+}
+function highlightedGeneralHeaders(columns){
+  return ['Golpe', ...columns.map(c => c.label.replace('Partido total','TOTAL'))];
+}
+function highlightedPlayerHeaders(sets){
+  return [
+    'Golpe',
+    ...sets.flatMap((s,idx) => [`${setTitle(s,idx)} J1`, `${setTitle(s,idx)} J2`]),
+    'TOTAL J1',
+    'TOTAL J2'
+  ];
+}
+function serviceRows(points, mode='SERVE'){
+  const isServe = mode === 'SERVE';
+  return ['1º','2º'].map(num => {
+    const list = points.filter(p => (isServe ? isOurServer(p.server) : isRivalServer(p.server)) && p.serve_number === num);
+    const won = count(list, p => p.point_result === 'WON');
+    const lost = count(list, p => p.point_result === 'LOST');
+    return [`${num} ${isServe ? 'saque' : 'resto'}`, list.length, won, lost, `${pct(won,list.length)}%`];
+  });
+}
+function serviceCompareRows(points, mode='SERVE'){
+  const isServe = mode === 'SERVE';
+  return ['J1','J2'].flatMap(player => ['1º','2º'].map(num => {
+    const list = points.filter(p => p.player_id === player && (isServe ? isOurServer(p.server) : isRivalServer(p.server)) && p.serve_number === num);
+    const won = count(list, p => p.point_result === 'WON');
+    return [player, `${num}`, list.length, won, `${pct(won,list.length)}%`];
+  })).filter(r => r[2] > 0);
+}
+
+async function imageDataUrl(src){
+  try{
+    const res = await fetch(src);
+    const blob = await res.blob();
+    return await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  }catch(_err){ return null; }
+}
+function sectionTitle(doc, title, x, y, w, color=GREEN){
+  doc.setFillColor(...color);
+  doc.roundedRect(x,y,w,10,2.5,2.5,'F');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(5.2);
+  doc.setTextColor(255,255,255);
+  doc.text(title,x+4,y+7);
+  doc.setTextColor(0,0,0);
+}
+function drawTable(doc, {x, y, w, head, body, color=GREEN, fontSize=5.3, rowHeight=10, headerHeight=11, alternate=true}){
+  if(!body.length) body = [['Sin datos', ...head.slice(1).map(() => '-')]];
+  doc.autoTable({
+    startY:y,
+    margin:{left:x,right:842-x-w},
+    tableWidth:w,
+    head:[head],
+    body,
+    theme:'grid',
+    styles:{fontSize, cellPadding:{top:0.45,right:1.3,bottom:0.45,left:1.3}, lineColor:LINE, lineWidth:0.3, minCellHeight:rowHeight, overflow:'ellipsize', valign:'middle'},
+    headStyles:{fillColor:color, textColor:255, fontStyle:'bold', minCellHeight:headerHeight},
+    alternateRowStyles: alternate ? {fillColor:[252,250,246]} : {},
+    columnStyles:{0:{cellWidth:Math.max(48, w * 0.34), fontStyle:'bold'}},
+    pageBreak:'avoid',
+    rowPageBreak:'avoid',
+    didParseCell:data => {
+      if(data.section === 'body' && data.column.index > 0){ data.cell.styles.halign = 'center'; }
+      if(data.section === 'head' && data.column.index > 0){ data.cell.styles.halign = 'center'; }
+    }
+  });
+  return doc.lastAutoTable.finalY;
+}
+function drawSmallBlock(doc, title, rows, x, y, w, color=GREEN, maxRows=5){
+  sectionTitle(doc,title,x,y,w,color);
+  return drawTable(doc,{x,y:y+15,w,head:['Concepto','Total','★','J1','J2'],body:rows.slice(0,maxRows),color,fontSize:4.9,rowHeight:8.6,headerHeight:9});
+}
+function drawMiniStats(doc, title, head, rows, x, y, w, color=BLUE){
+  sectionTitle(doc,title,x,y,w,color);
+  return drawTable(doc,{x,y:y+11,w,head,body:rows,color,fontSize:3.7,rowHeight:5.4,headerHeight:6.3});
+}
+
 export async function downloadPDF(points, match, name='santiset-informe.pdf'){
-  const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:'pt',format:'a4'}); const db=loadDB(); const sets=matchSets(db,match?.id); const g=general(points);
-  doc.setFillColor(31,77,61); doc.rect(0,0,595,96,'F'); doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(24); doc.text('SantiSet · Informe de partido',40,48); doc.setFontSize(11); doc.setFont('helvetica','normal'); doc.text(`${match?.rival_name||'Partido'} · ${new Date(match?.date||match?.created_at||Date.now()).toLocaleString('es-ES')}`,40,70); doc.setTextColor(0,0,0);
-  const info=[['Pareja rival',match?.rival_name||'-'],['Compañero',match?.partner_name||'-'],['Fecha',new Date(match?.date||match?.created_at||Date.now()).toLocaleString('es-ES')],['Tipo',match?.match_type||'-'],['Lugar',match?.location||'-'],['Tipo pista',match?.court_type||'-'],['Notas',match?.notes||'-']];
-  doc.autoTable({startY:120, head:[['Dato','Valor']], body:info, styles:{fontSize:9}, headStyles:{fillColor:[31,77,61]}});
-  const y=doc.lastAutoTable.finalY+24; kpiCards(doc,y,[['Puntos',g.total_points],['Ganados',g.won_points],['Perdidos',g.lost_points],['Destacados',g.highlighted_points]]);
-  addDonuts(doc,55,y+78,[{label:'Ganados / perdidos',sub:`${g.won_points}G · ${g.lost_points}P`,parts:[{value:g.won_points,color:'#1f7a42'},{value:g.lost_points,color:'#b42323'}]},{label:'Destacados',sub:`${g.highlighted_points}/${g.total_points}`,parts:[{value:g.highlighted_points,color:'#d66b1f'},{value:Math.max(0,g.total_points-g.highlighted_points),color:'#e4e8e3'}]}]);
-  for(const set of sets){ const pts=setPoints(db,set.id); const sg=general(pts); const srv=service(pts); doc.addPage(); doc.setTextColor(31,77,61); doc.setFont('helvetica','bold'); doc.setFontSize(19); doc.text(`Set ${set.set_number||1} · ${set.our_games}-${set.rival_games}`,40,54); doc.setTextColor(0,0,0); kpiCards(doc,76,[['Puntos',sg.total_points],['Ganados',sg.won_points],['Perdidos',sg.lost_points],['% ganado',`${sg.win_percentage}%`]]); addDonuts(doc,55,150,[{label:'Ganados / perdidos',sub:`${sg.won_points}G · ${sg.lost_points}P`,parts:[{value:sg.won_points,color:'#1f7a42'},{value:sg.lost_points,color:'#b42323'}]},{label:'1º saque',sub:`${srv.first_serve_won}/${srv.first_serve_points}`,parts:[{value:srv.first_serve_won,color:'#285c96'},{value:Math.max(0,srv.first_serve_points-srv.first_serve_won),color:'#e4e8e3'}]},{label:'2º saque',sub:`${srv.second_serve_won}/${srv.second_serve_points}`,parts:[{value:srv.second_serve_won,color:'#285c96'},{value:Math.max(0,srv.second_serve_points-srv.second_serve_won),color:'#e4e8e3'}]}]); doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.text('Análisis por jugador',40,300); doc.autoTable({startY:312, head:[['Jugador','Ganados','Perdidos','ENF','W/F','Forzados perdidos','Balance']], body:playerRows(pts,match), headStyles:{fillColor:[31,77,61]}}); doc.text('Servicio y resto',40,doc.lastAutoTable.finalY+30); doc.autoTable({startY:doc.lastAutoTable.finalY+42, head:[['Bloque','Jugados','Ganados','Perdidos','%']], body:serviceRows(pts), headStyles:{fillColor:[40,92,150]}}); const tops=topStrokes(pts); doc.text('Golpes destacados',40,doc.lastAutoTable.finalY+30); doc.autoTable({startY:doc.lastAutoTable.finalY+42, head:[['Golpe','Total','Positivos','Negativos','Balance']], body:(tops.positive.concat(tops.negative)).slice(0,10).map(x=>[x.stroke,x.total,x.pos,x.neg,x.balance]), headStyles:{fillColor:[210,95,28]}}); }
+  const {jsPDF} = window.jspdf;
+  const doc = new jsPDF({unit:'pt',format:'a4',orientation:'landscape'});
+  const db = loadDB();
+  const sets = matchSets(db, match?.id).sort((a,b)=>(a.set_number||0)-(b.set_number||0));
+  const allPoints = db.points.filter(p => p.match_id === match?.id);
+  const columns = summaryColumns(db, sets, match?.id);
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const usableW = pageW - margin*2;
+
+  // Una sola página: cabecera mínima y tablas compactas.
+  doc.setFillColor(...WHITE);
+  doc.rect(0,0,pageW,pageH,'F');
+  doc.setFillColor(...LIGHT);
+  doc.roundedRect(margin,10,usableW,30,7,7,'F');
+
+  const logo = await imageDataUrl('assets/images/logo-santiset-round.png') || await imageDataUrl('assets/images/logo-santiset.jpg');
+  if(logo){
+    try{ doc.addImage(logo,'PNG',20,15,20,20); }catch(_err){ try{ doc.addImage(logo,'JPEG',20,15,20,20); }catch(_e){} }
+  }
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...GREEN);
+  doc.text('SantiSet',45,22);
+  doc.setFontSize(4.8);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(80,80,80);
+  doc.text('Informe compacto',45,31);
+
+  const title = `${safeText(match?.partner_name,'Compañero')} vs ${safeText(match?.rival_name,'Rivales')}`;
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(35,32,28);
+  doc.text(title,pageW/2,22,{align:'center'});
+  doc.setFontSize(5.8);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(80,80,80);
+  doc.text(`Resultado: ${resultLine(sets)} · ${new Date(match?.date || match?.created_at || Date.now()).toLocaleDateString('es-ES')}`,pageW/2,32,{align:'center'});
+
+  const headers = ['Métrica', ...columns.map(c => c.label.replace('Partido total','TOTAL'))];
+  const summaryBody = [
+    ['Ptos jugados', ...columns.map(c => c.summary.pointsPlayed)],
+    ['Ptos ganados', ...columns.map(c => c.summary.pointsWon)],
+    ['Break a favor', ...columns.map(c => c.summary.breakFor)],
+    ['Break en contra', ...columns.map(c => c.summary.breakAgainst)],
+    ['Winners', ...columns.map(c => c.summary.winners)],
+    ['Unforced errors', ...columns.map(c => c.summary.unforced)]
+  ];
+
+  sectionTitle(doc,'RESUMEN DEL PARTIDO',margin,45,usableW,GREEN);
+  let y = drawTable(doc,{x:margin,y:59,w:usableW,head:headers,body:summaryBody,color:GREEN,fontSize:4.8,rowHeight:7.2,headerHeight:8.1});
+
+  const leftX = margin;
+  const rightX = margin + usableW/2 + 4;
+  const colW = usableW/2 - 4;
+  const headBySet = ['Categoría', ...columns.map(c => c.label.replace('Partido total','TOTAL'))];
+
+  y += 6;
+  let yL = y;
+  let yR = y;
+
+  sectionTitle(doc,'BLOQUE GENERAL - PUNTOS GANADOS',leftX,yL,colW,GREEN_2);
+  yL = drawTable(doc,{x:leftX,y:yL+11,w:colW,head:headBySet,body:tableRowsBySet(columns,'RIVAL_ERRORS',5),color:GREEN_2,fontSize:3.9,rowHeight:6.4,headerHeight:7.2});
+  yL = drawTable(doc,{x:leftX,y:yL+3,w:colW,head:headBySet,body:tableRowsBySet(columns,'WINNERS',6),color:GREEN_2,fontSize:3.9,rowHeight:6.4,headerHeight:7.2});
+
+  sectionTitle(doc,'BLOQUE GENERAL - PUNTOS PERDIDOS',rightX,yR,colW,RED);
+  yR = drawTable(doc,{x:rightX,y:yR+11,w:colW,head:headBySet,body:tableRowsBySet(columns,'OWN_ERRORS',6),color:RED,fontSize:3.9,rowHeight:6.4,headerHeight:7.2});
+  yR = drawTable(doc,{x:rightX,y:yR+3,w:colW,head:headBySet,body:tableRowsBySet(columns,'RIVAL_WINNERS',6),color:RED,fontSize:3.9,rowHeight:6.4,headerHeight:7.2});
+
+  y = Math.max(yL,yR) + 5;
+  const halfW = usableW/2 - 4;
+  const leftHalfX = margin;
+  const rightHalfX = margin + usableW/2 + 4;
+
+  sectionTitle(doc,'POR JUGADOR - PUNTOS GANADOS',leftHalfX,y,halfW,GREEN);
+  const yJG = drawTable(doc,{x:leftHalfX,y:y+11,w:halfW,head:['Categoría','J1','J2','TOTAL'],body:playerCompareRows(allPoints,OUTCOMES.WINNER_OR_FORCED,6),color:GREEN,fontSize:3.9,rowHeight:6.2,headerHeight:7.1});
+  sectionTitle(doc,'POR JUGADOR - PUNTOS PERDIDOS',rightHalfX,y,halfW,RED);
+  const yJP = drawTable(doc,{x:rightHalfX,y:y+11,w:halfW,head:['Categoría','J1','J2','TOTAL'],body:playerCompareRows(allPoints,OUTCOMES.OWN_UNFORCED_ERROR,6).concat(playerCompareRows(allPoints,OUTCOMES.RIVAL_WINNER_OR_OWN_FORCED,6)).slice(0,6),color:RED,fontSize:3.9,rowHeight:6.2,headerHeight:7.1});
+
+  y = Math.max(yJG,yJP) + 5;
+  const playerHighlightHead = highlightedPlayerHeaders(sets);
+
+  // Paneles de golpes: comparativa por jugador, sin usar estrella/highlight.
+  // Se muestran todos los golpes registrados con total > 0, ordenados de mayor a menor.
+  sectionTitle(doc,'GOLPES GANADOS - FONDO',leftHalfX,y,halfW,GREEN_2);
+  const yGF = drawTable(doc,{x:leftHalfX,y:y+11,w:halfW,head:playerHighlightHead,body:highlightedPlayerRows(sets,allPoints,OUTCOMES.WINNER_OR_FORCED,'BACK'),color:GREEN_2,fontSize:3.05,rowHeight:5.3,headerHeight:6.4});
+  sectionTitle(doc,'GOLPES GANADOS - RED',rightHalfX,y,halfW,TEAL);
+  const yGR = drawTable(doc,{x:rightHalfX,y:y+11,w:halfW,head:playerHighlightHead,body:highlightedPlayerRows(sets,allPoints,OUTCOMES.WINNER_OR_FORCED,'NET'),color:TEAL,fontSize:3.05,rowHeight:5.3,headerHeight:6.4});
+
+  y = Math.max(yGF,yGR) + 4;
+  sectionTitle(doc,'GOLPES PERDIDOS - FONDO',leftHalfX,y,halfW,ORANGE);
+  const yPF = drawTable(doc,{x:leftHalfX,y:y+11,w:halfW,head:playerHighlightHead,body:highlightedPlayerRows(sets,allPoints,[OUTCOMES.OWN_UNFORCED_ERROR,OUTCOMES.RIVAL_WINNER_OR_OWN_FORCED],'BACK'),color:ORANGE,fontSize:3.05,rowHeight:5.3,headerHeight:6.4});
+  sectionTitle(doc,'GOLPES PERDIDOS - RED',rightHalfX,y,halfW,PURPLE);
+  const yPR = drawTable(doc,{x:rightHalfX,y:y+11,w:halfW,head:playerHighlightHead,body:highlightedPlayerRows(sets,allPoints,[OUTCOMES.OWN_UNFORCED_ERROR,OUTCOMES.RIVAL_WINNER_OR_OWN_FORCED],'NET'),color:PURPLE,fontSize:3.05,rowHeight:5.3,headerHeight:6.4});
+
+  y = Math.max(yPF,yPR) + 5;
+  const serviceY = Math.min(y, pageH - 52);
+  drawMiniStats(doc,'COMPARATIVA JUGADORES - SERVICIO',['Jugador','Saq.','Jug.','Gan.','%'],serviceCompareRows(allPoints,'SERVE'),leftHalfX,serviceY,halfW,BLUE);
+  drawMiniStats(doc,'COMPARATIVA JUGADORES - RESTO',['Jugador','Resto','Jug.','Gan.','%'],serviceCompareRows(allPoints,'RETURN'),rightHalfX,serviceY,halfW,INDIGO);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(4.8);
+  doc.setTextColor(120,120,120);
+  doc.text('Break point: convertidos/oportunidades. Golpes: total > 0, sin usar la estrella.', pageW/2, pageH - 8, {align:'center'});
+
+  // Descarga directa; no se abre vista previa ni iframe.
   doc.save(name);
 }

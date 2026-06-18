@@ -1,12 +1,11 @@
 import {loadDB, createMatch, updateMatch, deleteMatch, deleteSet, createSetForMatch, updateSet, activateMatch, matchSets} from './storage.js';
-import {general, service, byPlayer, topStrokes} from './analytics.js';
+import {general} from './analytics.js';
 import {downloadCSV} from './csv.js';
 import {downloadPDF} from './pdf.js';
 import {mountNav} from './navigation.js';
 import {setScoreClass, setScoreText} from './scoring.js';
 
 const $ = s => document.querySelector(s);
-let pendingPdfMatchId=null;
 
 function icon(name){
   const icons = {
@@ -31,28 +30,88 @@ function resultLine(sets){
   return sets.map(s=>`<span class="set-chip ${setScoreClass(s)}">S${s.set_number||1} ${setScoreText(s)}<button class="set-mini video" title="Cambiar vídeo del set" data-set-video="${s.id}">🎬</button><button class="set-mini remove" title="Borrar set" data-delete-set="${s.id}">×</button></span>`).join('');
 }
 function infoHTML(m, sets, g){ return `<div><span>Rival</span><strong>${m.rival_name||'-'}</strong></div><div><span>Compañero</span><strong>${m.partner_name||'-'}</strong></div><div><span>Tipo</span><strong>${m.match_type||'-'}</strong></div><div><span>Lugar</span><strong>${m.location||'-'}</strong></div><div><span>Fecha</span><strong>${new Date(m.date||m.created_at||Date.now()).toLocaleString('es-ES')}</strong></div><div><span>Pista</span><strong>${m.court_type||'-'}</strong></div><div><span>Sets</span><strong>${sets.length}</strong></div><div><span>Vídeos set</span><strong>${sets.filter(s=>s.video_url).length}</strong></div><div><span>Puntos</span><strong>${g.total_points}</strong></div><div><span>Notas</span><strong>${m.notes||'-'}</strong></div>`; }
-function donut(label, value, total, cls='green'){
-  const pct=total ? Math.round((value/total)*100) : 0;
-  return `<div class="preview-donut"><div class="donut ${cls}" style="--pct:${pct}"><span>${pct}%</span></div><strong>${label}</strong><small>${value}/${total}</small></div>`;
+
+
+
+function isOurServer(server){ return ['J1','J2'].includes(server); }
+function isRivalServer(server){ return ['R1','R2'].includes(server); }
+function isTruthy(value){ return value === true || value === 1 || String(value).toLowerCase() === 'true'; }
+function gamePointFor(attackerPoint, defenderPoint, mode='ADVANTAGE'){
+  const a = String(attackerPoint ?? '0');
+  const d = String(defenderPoint ?? '0');
+
+  // Punto de oro: en 40-40 ambos tienen punto para llevarse el juego.
+  if(mode === 'GOLDEN_POINT' && a === '40' && d === '40') return true;
+
+  // Ventaja normal: AD o 40 con margen suficiente antes del deuce.
+  if(a === 'AD') return true;
+  return a === '40' && ['0','15','30'].includes(d);
 }
-function resultDonut(won,lost){
-  const total=won+lost; const pct=total?Math.round(won/total*100):0; const lostPct=total?100-pct:0;
-  return `<div class="preview-donut wide"><div class="donut result" style="--won:${pct};--lost:${lostPct}"><span>${pct}%</span></div><strong>Ganados / perdidos</strong><small>${won}G · ${lost}P</small></div>`;
+function matchSummary(points, sets=[]){
+  const g = general(points);
+  const bySet = new Map();
+  points.forEach(p => {
+    const key = p.set_id || 'sin_set';
+    if(!bySet.has(key)) bySet.set(key, []);
+    bySet.get(key).push(p);
+  });
+
+  let bpForTotal = 0, bpForWon = 0;
+  let bpAgainstTotal = 0, bpAgainstWon = 0;
+  const orderedSetIds = sets.length ? sets.map(s => s.id) : [...bySet.keys()];
+
+  orderedSetIds.forEach(setId => {
+    const setPoints = (bySet.get(setId) || []).slice().sort((a,b) =>
+      Number(a.point_id || 0) - Number(b.point_id || 0) ||
+      String(a.timestamp || '').localeCompare(String(b.timestamp || ''))
+    );
+
+    // Estado ANTES del punto actual. Se actualiza con los campos *_after del punto guardado.
+    let before = {ourGames:0, rivalGames:0, ourPoint:'0', rivalPoint:'0', inTiebreak:false};
+
+    setPoints.forEach(p => {
+      const mode = p.deuce_mode || 'ADVANTAGE';
+
+      if(!before.inTiebreak && isRivalServer(p.server) && gamePointFor(before.ourPoint, before.rivalPoint, mode)){
+        bpForTotal++;
+        if(Number(p.our_games_after || 0) > before.ourGames) bpForWon++;
+      }
+
+      if(!before.inTiebreak && isOurServer(p.server) && gamePointFor(before.rivalPoint, before.ourPoint, mode)){
+        bpAgainstTotal++;
+        if(Number(p.rival_games_after || 0) > before.rivalGames) bpAgainstWon++;
+      }
+
+      before = {
+        ourGames: Number(p.our_games_after || 0),
+        rivalGames: Number(p.rival_games_after || 0),
+        ourPoint: String(p.our_points_after ?? '0'),
+        rivalPoint: String(p.rival_points_after ?? '0'),
+        inTiebreak: isTruthy(p.in_tiebreak_after)
+      };
+    });
+  });
+
+  return {
+    pointsPlayed: g.total_points,
+    pointsWon: g.won_points,
+    breakPointsFor: `${bpForWon}/${bpForTotal}`,
+    breakPointsAgainst: `${bpAgainstWon}/${bpAgainstTotal}`,
+    winners: g.winner_or_forced,
+    unforcedErrors: g.own_unforced_errors,
+    highlighted: g.highlighted_points
+  };
 }
-function previewHTML(match){
-  const db=loadDB(); const pts=db.points.filter(p=>p.match_id===match.id); const g=general(pts); const sets=matchSets(db,match.id);
-  return `<section class="preview-cover"><h2>${match.rival_name||'Partido'}</h2><p>${new Date(match.date||match.created_at||Date.now()).toLocaleString('es-ES')} · ${match.location||'Sin lugar'} · ${match.court_type||'pista'}</p><div class="set-scoreline">${resultLine(sets)}</div></section>
-  <section class="preview-chart-grid two">${resultDonut(g.won_points,g.lost_points)}${donut('Destacados',g.highlighted_points,g.total_points,'orange')}</section>
-  <section class="preview-kpis"><div><span>Puntos</span><strong>${g.total_points}</strong></div><div><span>Ganados</span><strong>${g.won_points}</strong></div><div><span>Perdidos</span><strong>${g.lost_points}</strong></div><div><span>% ganados</span><strong>${g.win_percentage}%</strong></div></section>
-  ${sets.map(s=>{ const sp=db.points.filter(p=>p.set_id===s.id); const sg=general(sp); const srv=service(sp); const j1=byPlayer(sp,'J1'), j2=byPlayer(sp,'J2'); return `<section class="preview-set"><h3>Set ${s.set_number||1} · ${setScoreText(s)}</h3><div class="preview-chart-grid small">${resultDonut(sg.won_points,sg.lost_points)}${donut('1º saque ganado',srv.first_serve_won,srv.first_serve_points,'blue')}${donut('2º saque ganado',srv.second_serve_won,srv.second_serve_points,'blue')}</div><table><thead><tr><th>Jugador</th><th>Ganados</th><th>Perdidos</th><th>Balance</th></tr></thead><tbody><tr><td>Revés/J1</td><td>${j1.won_by_player}</td><td>${j1.lost_by_player}</td><td>${j1.balance}</td></tr><tr><td>Derecha/J2</td><td>${j2.won_by_player}</td><td>${j2.lost_by_player}</td><td>${j2.balance}</td></tr></tbody></table></section>`; }).join('')}`;
+function matchSummaryHTML(summary){
+  return `<div class="match-summary"><div class="match-summary__title">Resumen del partido</div><div class="match-summary__grid"><div class="summary-item"><span class="summary-item__label">Ptos jugados</span><span class="summary-item__value">${summary.pointsPlayed}</span></div><div class="summary-item"><span class="summary-item__label">Ptos ganados</span><span class="summary-item__value">${summary.pointsWon}</span></div><div class="summary-item bp-favor"><span class="summary-item__label">Break a favor</span><span class="summary-item__value">${summary.breakPointsFor}</span></div><div class="summary-item bp-contra"><span class="summary-item__label">Break en contra</span><span class="summary-item__value">${summary.breakPointsAgainst}</span></div><div class="summary-item"><span class="summary-item__label">Winners</span><span class="summary-item__value">${summary.winners}</span></div><div class="summary-item"><span class="summary-item__label">Unforced errors</span><span class="summary-item__value">${summary.unforcedErrors}</span></div><div class="summary-item highlighted"><span class="summary-item__label">★ Ptos destacados</span><span class="summary-item__value">${summary.highlighted}</span></div></div></div>`;
 }
 
 function render(){
   const db=loadDB(); const q=($('#search')?.value||'').toLowerCase().trim();
   const matches=db.matches.filter(m=>!q || [m.rival_name,m.partner_name,m.location,m.match_type,m.court_type].join(' ').toLowerCase().includes(q));
   $('#matches').innerHTML=matches.map(m=>{
-    const pts=db.points.filter(p=>p.match_id===m.id); const g=general(pts); const sets=matchSets(db,m.id);
-    return `<article class="card match-card"><div class="match-head"><div><span class="small">${new Date(m.date||m.created_at||Date.now()).toLocaleString('es-ES')}</span><h3>${m.rival_name||'Rival sin nombre'}</h3><p class="small">${m.partner_name?`Compañero: ${m.partner_name} · `:''}${m.match_type||'amistoso'} · ${m.court_type||'pista'} ${m.location?`· ${m.location}`:''}</p></div></div><div class="set-scoreline">${resultLine(sets)}</div><div class="match-meta-grid"><span class="pill">🎾 ${g.total_points} puntos</span><span class="pill">🏆 ${g.won_points} ganados</span><span class="pill">✕ ${g.lost_points} perdidos</span><span class="pill">★ ${g.highlighted_points} destacados</span></div><div class="match-actions"><button class="icon-btn info" title="Info" aria-label="Info" data-info="${m.id}">${icon('info')}</button><button class="icon-btn edit" title="Editar datos" aria-label="Editar datos" data-edit="${m.id}">${icon('edit')}</button><button class="icon-btn dash" title="Dashboard" aria-label="Dashboard" data-dashboard="${m.id}">${icon('chart')}</button><button class="icon-btn events" title="Eventos" aria-label="Eventos" data-events="${m.id}">${icon('racket')}</button><button class="icon-btn pdf" title="Vista previa PDF" aria-label="Vista previa PDF" data-pdf="${m.id}">${icon('pdf')}</button><button class="icon-btn csv" title="Exportar CSV por set" aria-label="Exportar CSV por set" data-csv="${m.id}">${icon('csv')}</button><button class="icon-btn analyze" title="Analizar este partido" aria-label="Analizar este partido" data-edit-analysis="${m.id}">${icon('play')}</button><button class="icon-btn delete" title="Eliminar" aria-label="Eliminar" data-delete="${m.id}">${icon('trash')}</button></div></article>`;
+    const pts=db.points.filter(p=>p.match_id===m.id); const sets=matchSets(db,m.id); const summary=matchSummary(pts,sets);
+    return `<article class="card match-card"><div class="match-head"><div><span class="small">${new Date(m.date||m.created_at||Date.now()).toLocaleString('es-ES')}</span><h3>${m.rival_name||'Rival sin nombre'}</h3><p class="small">${m.partner_name?`Compañero: ${m.partner_name} · `:''}${m.match_type||'amistoso'} · ${m.court_type||'pista'} ${m.location?`· ${m.location}`:''}</p></div></div><div class="set-scoreline">${resultLine(sets)}</div>${matchSummaryHTML(summary)}<div class="match-actions"><button class="icon-btn info" title="Info" aria-label="Info" data-info="${m.id}">${icon('info')}</button><button class="icon-btn edit" title="Editar datos" aria-label="Editar datos" data-edit="${m.id}">${icon('edit')}</button><button class="icon-btn dash" title="Dashboard" aria-label="Dashboard" data-dashboard="${m.id}">${icon('chart')}</button><button class="icon-btn events" title="Eventos" aria-label="Eventos" data-events="${m.id}">${icon('racket')}</button><button class="icon-btn pdf" title="Descargar PDF" aria-label="Descargar PDF" data-pdf="${m.id}">${icon('pdf')}</button><button class="icon-btn csv" title="Exportar CSV por set" aria-label="Exportar CSV por set" data-csv="${m.id}">${icon('csv')}</button><button class="icon-btn analyze" title="Analizar este partido" aria-label="Analizar este partido" data-edit-analysis="${m.id}">${icon('play')}</button><button class="icon-btn delete" title="Eliminar" aria-label="Eliminar" data-delete="${m.id}">${icon('trash')}</button></div></article>`;
   }).join('') || '<p class="small">Todavía no hay partidos guardados.</p>';
 }
 function openForm(match=null){ const form=$('#matchForm'); $('#matchDialogTitle').textContent=match?'Editar partido':'Crear partido'; form.id.value=match?.id||''; form.rival_name.value=match?.rival_name||''; form.partner_name.value=match?.partner_name||''; form.match_type.value=match?.match_type||'amistoso'; form.court_type.value=match?.court_type||'indoor'; form.location.value=match?.location||''; form.date.value=dateInputValue(match?.date); form.video_url.value=match?.video_url||''; form.notes.value=match?.notes||''; $('#matchDialog').showModal(); }
@@ -67,7 +126,6 @@ function openSetVideoDialog(setId){
 document.addEventListener('click',async e=>{
   const btn=e.target.closest('button'); if(!btn) return; const db=loadDB();
   if(btn.id==='newMatch') openForm(null);
-  if(btn.id==='confirmPDFExport' && pendingPdfMatchId){ const latest=loadDB(); const m=latest.matches.find(x=>x.id===pendingPdfMatchId); await downloadPDF(latest.points.filter(p=>p.match_id===m.id),m,`${filenameSafe(m.rival_name)}-informe.pdf`); }
   if(btn.dataset.edit) openForm(db.matches.find(m=>m.id===btn.dataset.edit));
   if(btn.dataset.info){ const m=db.matches.find(x=>x.id===btn.dataset.info); const sets=matchSets(db,m.id); $('#infoContent').innerHTML=infoHTML(m,sets,general(db.points.filter(p=>p.match_id===m.id))); $('#infoDialog').showModal(); }
   if(btn.dataset.delete && confirm('¿Eliminar este partido con todos sus sets y puntos?')){ deleteMatch(btn.dataset.delete); render(); }
@@ -77,7 +135,7 @@ document.addEventListener('click',async e=>{
   if(btn.dataset.dashboard){ activateMatch(btn.dataset.dashboard); location.href='dashboard.html'; }
   if(btn.dataset.events){ activateMatch(btn.dataset.events); location.href='events.html'; }
   if(btn.dataset.csv){ const m=db.matches.find(x=>x.id===btn.dataset.csv); const sets=matchSets(db,m.id); sets.forEach(s=>downloadCSV(db.points.filter(p=>p.set_id===s.id),`${filenameSafe(m.rival_name)}-set-${s.set_number||1}.csv`)); }
-  if(btn.dataset.pdf){ pendingPdfMatchId=btn.dataset.pdf; const m=db.matches.find(x=>x.id===pendingPdfMatchId); $('#pdfPreviewContent').innerHTML=previewHTML(m); $('#pdfPreviewDialog').showModal(); }
+  if(btn.dataset.pdf){ const m=db.matches.find(x=>x.id===btn.dataset.pdf); if(m) await downloadPDF(db.points.filter(p=>p.match_id===m.id),m,`${filenameSafe(m.rival_name)}-informe.pdf`); }
   if(btn.dataset.close) $(`#${btn.dataset.close}`).close();
 });
 $('#matchForm').addEventListener('submit',e=>{ const data=formData(e.currentTarget); if(data.id) updateMatch(data.id,data); else createMatch(data,true); render(); });
