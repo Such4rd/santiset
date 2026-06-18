@@ -81,10 +81,49 @@ function summaryForPoints(points){
     unforced:g.own_unforced_errors
   };
 }
+function fractionParts(value){
+  const [a,b] = String(value || '0/0').split('/').map(n => Number(n || 0));
+  return {won:a || 0, total:b || 0};
+}
+function fractionText(items, key){
+  return items.reduce((acc,item) => {
+    const f = fractionParts(item[key]);
+    acc.won += f.won;
+    acc.total += f.total;
+    return acc;
+  }, {won:0,total:0});
+}
+function totalSummaryFromSets(setSummaries, allPoints){
+  const base = general(allPoints);
+  const bpFor = fractionText(setSummaries, 'breakFor');
+  const bpAgainst = fractionText(setSummaries, 'breakAgainst');
+
+  return {
+    pointsPlayed:base.total_points,
+    pointsWon:base.won_points,
+    // Importante: el total de break points se suma por sets.
+    // No se recalcula recorriendo todo el partido, porque point_id se repite por set
+    // y el marcador debe reiniciarse en cada set.
+    breakFor:`${bpFor.won}/${bpFor.total}`,
+    breakAgainst:`${bpAgainst.won}/${bpAgainst.total}`,
+    winners:base.winner_or_forced,
+    unforced:base.own_unforced_errors
+  };
+}
 function summaryColumns(db, sets, matchId){
-  const cols = sets.map(s => ({label:setTitle(s,0), points:setPoints(db,s.id)}));
-  cols.push({label:'Partido total', points:db.points.filter(p=>p.match_id===matchId)});
-  return cols.map(c => ({...c, summary:summaryForPoints(c.points)}));
+  const setCols = sets.map((s,idx) => {
+    const points = setPoints(db,s.id);
+    return {label:setTitle(s,idx), points, summary:summaryForPoints(points)};
+  });
+
+  const allPoints = db.points.filter(p=>p.match_id===matchId);
+  setCols.push({
+    label:'Partido total',
+    points:allPoints,
+    summary:totalSummaryFromSets(setCols.map(c => c.summary), allPoints)
+  });
+
+  return setCols;
 }
 
 function wonRivalErrorRows(points){
@@ -123,6 +162,19 @@ function playerCompareRows(points, outcome, maxRows=7){
     total
   ]).sort((a,b) => Number(b[3] || 0) - Number(a[3] || 0));
   return rows.filter(r => r[3] > 0).slice(0,maxRows);
+}
+function playerCompareRowsTyped(points, definitions, maxRows=7){
+  const rows = definitions.flatMap(def =>
+    categoryRows(points, def.outcome).map(([label,total]) => [
+      def.label,
+      label,
+      count(points, p => p.outcome === def.outcome && labelCat(p.stroke_category) === label && p.player_id === 'J1'),
+      count(points, p => p.outcome === def.outcome && labelCat(p.stroke_category) === label && p.player_id === 'J2'),
+      total
+    ])
+  ).sort((a,b) => Number(b[4] || 0) - Number(a[4] || 0));
+
+  return rows.filter(r => Number(r[4] || 0) > 0).slice(0,maxRows);
 }
 
 function strokeLabel(p){
@@ -222,13 +274,50 @@ function serviceRows(points, mode='SERVE'){
     return [`${num} ${isServe ? 'saque' : 'resto'}`, list.length, won, lost, `${pct(won,list.length)}%`];
   });
 }
+function serveNumberMatches(value, num){
+  const raw = String(value || '').trim().toUpperCase();
+  if(num === '1º') return ['1','1º','1O','PRIMERO','PRIMER'].includes(raw);
+  if(num === '2º') return ['2','2º','2O','SEGUNDO','SEGUNDA'].includes(raw);
+  return raw === String(num || '').trim().toUpperCase();
+}
+function explicitReturnPlayer(p){
+  const candidates = [p.returner_id, p.receiver_id, p.return_player_id, p.returner, p.receiver];
+  const found = candidates.find(v => ['J1','J2'].includes(String(v || '').trim().toUpperCase()));
+  return found ? String(found).trim().toUpperCase() : '';
+}
 function serviceCompareRows(points, mode='SERVE'){
   const isServe = mode === 'SERVE';
-  return ['J1','J2'].flatMap(player => ['1º','2º'].map(num => {
-    const list = points.filter(p => p.player_id === player && (isServe ? isOurServer(p.server) : isRivalServer(p.server)) && p.serve_number === num);
+
+  if(isServe){
+    // Servicio por jugador: se calcula por p.server.
+    // player_id NO sirve aquí, porque representa el jugador del golpe final.
+    return ['J1','J2'].flatMap(player => ['1º','2º'].map(num => {
+      const list = points.filter(p => p.server === player && serveNumberMatches(p.serve_number, num));
+      const won = count(list, p => p.point_result === 'WON');
+      return [player, `${num}`, list.length, won, `${pct(won,list.length)}%`];
+    })).filter(r => r[2] > 0);
+  }
+
+  const hasExplicitReturner = points.some(p => explicitReturnPlayer(p));
+  if(hasExplicitReturner){
+    return ['J1','J2'].flatMap(player => ['1º','2º'].map(num => {
+      const list = points.filter(p =>
+        explicitReturnPlayer(p) === player &&
+        isRivalServer(p.server) &&
+        serveNumberMatches(p.serve_number, num)
+      );
+      const won = count(list, p => p.point_result === 'WON');
+      return [player, `${num}`, list.length, won, `${pct(won,list.length)}%`];
+    })).filter(r => r[2] > 0);
+  }
+
+  // Sin campo de restador en el CSV no se puede separar J1/J2 de forma fiable.
+  // En ese caso mostramos el rendimiento de la pareja al resto para no falsear datos con player_id.
+  return ['1º','2º'].map(num => {
+    const list = points.filter(p => isRivalServer(p.server) && serveNumberMatches(p.serve_number, num));
     const won = count(list, p => p.point_result === 'WON');
-    return [player, `${num}`, list.length, won, `${pct(won,list.length)}%`];
-  })).filter(r => r[2] > 0);
+    return ['Pareja', `${num}`, list.length, won, `${pct(won,list.length)}%`];
+  }).filter(r => r[2] > 0);
 }
 
 async function imageDataUrl(src){
@@ -363,7 +452,20 @@ export async function downloadPDF(points, match, name='santiset-informe.pdf'){
   sectionTitle(doc,'POR JUGADOR - PUNTOS GANADOS',leftHalfX,y,halfW,GREEN);
   const yJG = drawTable(doc,{x:leftHalfX,y:y+11,w:halfW,head:['Categoría','J1','J2','TOTAL'],body:playerCompareRows(allPoints,OUTCOMES.WINNER_OR_FORCED,6),color:GREEN,fontSize:3.9,rowHeight:6.2,headerHeight:7.1});
   sectionTitle(doc,'POR JUGADOR - PUNTOS PERDIDOS',rightHalfX,y,halfW,RED);
-  const yJP = drawTable(doc,{x:rightHalfX,y:y+11,w:halfW,head:['Categoría','J1','J2','TOTAL'],body:playerCompareRows(allPoints,OUTCOMES.OWN_UNFORCED_ERROR,6).concat(playerCompareRows(allPoints,OUTCOMES.RIVAL_WINNER_OR_OWN_FORCED,6)).slice(0,6),color:RED,fontSize:3.9,rowHeight:6.2,headerHeight:7.1});
+  const yJP = drawTable(doc,{
+    x:rightHalfX,
+    y:y+11,
+    w:halfW,
+    head:['Tipo','Categoría','J1','J2','TOTAL'],
+    body:playerCompareRowsTyped(allPoints,[
+      {label:'ENF propio', outcome:OUTCOMES.OWN_UNFORCED_ERROR},
+      {label:'W rival/F propio', outcome:OUTCOMES.RIVAL_WINNER_OR_OWN_FORCED}
+    ],7),
+    color:RED,
+    fontSize:3.65,
+    rowHeight:6.0,
+    headerHeight:7.0
+  });
 
   y = Math.max(yJG,yJP) + 5;
   const playerHighlightHead = highlightedPlayerHeaders(sets);
@@ -389,7 +491,7 @@ export async function downloadPDF(points, match, name='santiset-informe.pdf'){
   doc.setFont('helvetica','normal');
   doc.setFontSize(4.8);
   doc.setTextColor(120,120,120);
-  doc.text('Break point: convertidos/oportunidades. Golpes: total > 0, sin usar la estrella.', pageW/2, pageH - 8, {align:'center'});
+  doc.text('Break point: convertidos/oportunidades. Golpes: total > 0, sin usar la estrella. Resto por jugador solo si el CSV trae restador explícito.', pageW/2, pageH - 8, {align:'center'});
 
   // Descarga directa; no se abre vista previa ni iframe.
   doc.save(name);
